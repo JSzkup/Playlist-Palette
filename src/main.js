@@ -129,8 +129,16 @@ function initVisualizer() {
     requestAnimationFrame(cacheImageData);
   });
 
-  // Canvas mousemove — show song tooltip
+  // Canvas interaction — per color-block ("pixel")
+  // A "pixel" = one color block, not one screen pixel.
+  // We cache the image data and snap to block boundaries so the tooltip
+  // is stable within a single block and only changes when you enter a new one.
+  const PIXEL_SIZE = 8; // must match what we pass to generateTieDye
   let cachedImageData = null;
+  let lastBlockCol = -1;
+  let lastBlockRow = -1;
+  let lastSong = null;
+  let lastColorName = null;
 
   function cacheImageData() {
     const ctx = canvas.getContext("2d");
@@ -140,30 +148,70 @@ function initVisualizer() {
   // Cache image data after initial draw
   cacheImageData();
 
-  canvas.addEventListener("mousemove", (e) => {
-    if (!cachedImageData || !appState.playlists) return;
-
+  /**
+   * Convert a mouse event to the block (col, row) it falls within.
+   * Returns null if out of bounds.
+   */
+  function eventToBlock(e) {
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
-    const x = Math.floor((e.clientX - rect.left) * scaleX);
-    const y = Math.floor((e.clientY - rect.top) * scaleY);
+    const canvasX = Math.floor((e.clientX - rect.left) * scaleX);
+    const canvasY = Math.floor((e.clientY - rect.top) * scaleY);
 
-    if (x < 0 || x >= canvas.width || y < 0 || y >= canvas.height) {
+    if (
+      canvasX < 0 ||
+      canvasX >= canvas.width ||
+      canvasY < 0 ||
+      canvasY >= canvas.height
+    ) {
+      return null;
+    }
+
+    const blockCol = Math.floor(canvasX / PIXEL_SIZE);
+    const blockRow = Math.floor(canvasY / PIXEL_SIZE);
+    return { blockCol, blockRow, canvasX, canvasY };
+  }
+
+  /**
+   * Get the color of the center of a block (avoids edge artifacts).
+   */
+  function getBlockColor(blockCol, blockRow) {
+    // Sample the center pixel of the block
+    const cx = blockCol * PIXEL_SIZE + Math.floor(PIXEL_SIZE / 2);
+    const cy = blockRow * PIXEL_SIZE + Math.floor(PIXEL_SIZE / 2);
+    const idx = (cy * canvas.width + cx) * 4;
+    return {
+      r: cachedImageData.data[idx],
+      g: cachedImageData.data[idx + 1],
+      b: cachedImageData.data[idx + 2],
+    };
+  }
+
+  canvas.addEventListener("mousemove", (e) => {
+    if (!cachedImageData || !appState.playlists) return;
+
+    const block = eventToBlock(e);
+    if (!block) {
       hideTooltip();
       return;
     }
 
-    const idx = (y * canvas.width + x) * 4;
-    const r = cachedImageData.data[idx];
-    const g = cachedImageData.data[idx + 1];
-    const b = cachedImageData.data[idx + 2];
+    const { blockCol, blockRow } = block;
 
-    const colorName = findClosestColor(r, g, b);
-    const song = getRandomSongForColor(appState.playlists, colorName);
+    // Only update song when we enter a NEW block
+    if (blockCol !== lastBlockCol || blockRow !== lastBlockRow) {
+      lastBlockCol = blockCol;
+      lastBlockRow = blockRow;
 
-    if (song) {
-      showTooltip(song, colorName, e.pageX, e.pageY);
+      const { r, g, b } = getBlockColor(blockCol, blockRow);
+      lastColorName = findClosestColor(r, g, b);
+      lastSong = getRandomSongForColor(appState.playlists, lastColorName);
+    }
+
+    // Always update tooltip position (follows cursor smoothly)
+    if (lastSong) {
+      showTooltip(lastSong, lastColorName, e.pageX, e.pageY);
     } else {
       hideTooltip();
     }
@@ -171,25 +219,20 @@ function initVisualizer() {
 
   canvas.addEventListener("mouseleave", () => {
     hideTooltip();
+    lastBlockCol = -1;
+    lastBlockRow = -1;
+    lastSong = null;
+    lastColorName = null;
   });
 
-  // Canvas click — toggle color selection
+  // Canvas click — toggle color selection (per-block)
   canvas.addEventListener("click", (e) => {
     if (!cachedImageData || !appState.playlists) return;
 
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    const x = Math.floor((e.clientX - rect.left) * scaleX);
-    const y = Math.floor((e.clientY - rect.top) * scaleY);
+    const block = eventToBlock(e);
+    if (!block) return;
 
-    if (x < 0 || x >= canvas.width || y < 0 || y >= canvas.height) return;
-
-    const idx = (y * canvas.width + x) * 4;
-    const r = cachedImageData.data[idx];
-    const g = cachedImageData.data[idx + 1];
-    const b = cachedImageData.data[idx + 2];
-
+    const { r, g, b } = getBlockColor(block.blockCol, block.blockRow);
     const colorName = findClosestColor(r, g, b);
     toggleColor(colorName);
   });

@@ -1,20 +1,22 @@
 /**
  * Tie-Dye Canvas Generator
  *
- * Generates a procedural pixelated tie-dye pattern using value noise
- * with the 7 core playlist colors. Supports "Custom Rainbow Mode"
- * where pixel counts match song counts per color.
+ * Generates a procedural pixelated tie-dye pattern that mimics real tie-dye:
+ * bold concentric spiral color bands radiating from fold points.
+ * Each "pixel" is a color block (e.g., 8×8 actual pixels).
+ *
+ * Supports "Custom Rainbow Mode" where block counts match song counts per color.
  */
 
 // Core playlist colors with RGB values
 const CORE_COLORS = [
-  { name: "Red", rgb: [255, 0, 0] },
-  { name: "Orange", rgb: [255, 165, 0] },
-  { name: "Yellow", rgb: [255, 255, 0] },
-  { name: "Green", rgb: [0, 128, 0] },
-  { name: "Blue", rgb: [0, 0, 255] },
-  { name: "Purple", rgb: [128, 0, 128] },
-  { name: "Pink", rgb: [255, 192, 203] },
+  { name: "Red", rgb: [255, 30, 30] },
+  { name: "Orange", rgb: [255, 140, 20] },
+  { name: "Yellow", rgb: [255, 230, 30] },
+  { name: "Green", rgb: [20, 160, 50] },
+  { name: "Blue", rgb: [30, 60, 255] },
+  { name: "Purple", rgb: [140, 30, 180] },
+  { name: "Pink", rgb: [255, 100, 160] },
 ];
 
 /**
@@ -31,74 +33,14 @@ function createRNG(seed) {
 }
 
 /**
- * Generates smooth value noise for tie-dye swirls.
- */
-function generateNoiseGrid(cols, rows, scale, rng) {
-  // Create a grid of random values at lower resolution
-  const noiseW = Math.ceil(cols / scale) + 2;
-  const noiseH = Math.ceil(rows / scale) + 2;
-  const grid = [];
-  for (let i = 0; i < noiseH; i++) {
-    grid[i] = [];
-    for (let j = 0; j < noiseW; j++) {
-      grid[i][j] = rng();
-    }
-  }
-  return grid;
-}
-
-/**
- * Bicubic-ish interpolation for smoother noise.
- */
-function smoothNoise(grid, x, y, scale) {
-  const fx = x / scale;
-  const fy = y / scale;
-  const ix = Math.floor(fx);
-  const iy = Math.floor(fy);
-  const dx = fx - ix;
-  const dy = fy - iy;
-
-  // Smoothstep
-  const sx = dx * dx * (3 - 2 * dx);
-  const sy = dy * dy * (3 - 2 * dy);
-
-  const row = grid[iy] || grid[0];
-  const rowNext = grid[iy + 1] || grid[0];
-
-  const v00 = row[ix] || 0;
-  const v10 = row[ix + 1] || 0;
-  const v01 = rowNext[ix] || 0;
-  const v11 = rowNext[ix + 1] || 0;
-
-  const top = v00 + sx * (v10 - v00);
-  const bottom = v01 + sx * (v11 - v01);
-  return top + sy * (bottom - top);
-}
-
-/**
- * Multi-octave noise for organic patterns.
- */
-function fractalNoise(grids, x, y, scales) {
-  let value = 0;
-  let amplitude = 1;
-  let totalAmp = 0;
-  for (let i = 0; i < grids.length; i++) {
-    value += smoothNoise(grids[i], x, y, scales[i]) * amplitude;
-    totalAmp += amplitude;
-    amplitude *= 0.5;
-  }
-  return value / totalAmp;
-}
-
-/**
  * Generates the tie-dye pattern on the canvas.
  *
  * @param {HTMLCanvasElement} canvas
  * @param {Object} options
- * @param {number} [options.pixelSize=8] - Size of each pixel block
- * @param {number} [options.seed] - Random seed (auto-generated if omitted)
+ * @param {number} [options.pixelSize=8] - Size of each color block in actual pixels
+ * @param {number} [options.seed] - Random seed
  * @param {boolean} [options.rainbowMode=false] - Custom rainbow mode
- * @param {Record<string, object[]>} [options.playlists] - Playlist data (needed for rainbow mode)
+ * @param {Record<string, object[]>} [options.playlists] - Playlist data (for rainbow mode)
  */
 export function generateTieDye(canvas, options = {}) {
   const {
@@ -117,77 +59,165 @@ export function generateTieDye(canvas, options = {}) {
   if (rainbowMode && playlists) {
     generateRainbowMode(ctx, cols, rows, pixelSize, playlists, seed);
   } else {
-    generateTieDyePattern(ctx, cols, rows, pixelSize, seed);
+    generateSpiralTieDye(ctx, cols, rows, pixelSize, seed);
   }
 }
 
 /**
- * Standard tie-dye pattern using multi-octave noise with swirl distortion.
+ * Spiral tie-dye: creates 2-4 fold centers, each radiating concentric
+ * color bands that spiral outward. Colors transition in rainbow order
+ * as you move away from the center, with slight wobble for organic feel.
  */
-function generateTieDyePattern(ctx, cols, rows, pixelSize, seed) {
+function generateSpiralTieDye(ctx, cols, rows, pixelSize, seed) {
   const rng = createRNG(seed);
 
-  // Generate noise layers at different scales for organic look
-  const scales = [12, 6, 3];
-  const grids = scales.map((s) => generateNoiseGrid(cols, rows, s, rng));
-
-  // Create swirl centers for tie-dye effect
-  const numSwirls = 3 + Math.floor(rng() * 4);
-  const swirls = [];
-  for (let i = 0; i < numSwirls; i++) {
-    swirls.push({
-      x: rng() * cols,
-      y: rng() * rows,
-      strength: 0.5 + rng() * 2,
-      radius: 10 + rng() * 30,
+  // Create fold/spiral centers (like where you'd pinch the fabric)
+  const numCenters = 2 + Math.floor(rng() * 3); // 2-4 centers
+  const centers = [];
+  for (let i = 0; i < numCenters; i++) {
+    centers.push({
+      x: 0.15 + rng() * 0.7, // normalized 0-1, keep away from edges
+      y: 0.15 + rng() * 0.7,
+      // Each center starts at a different color offset for variety
+      colorOffset: Math.floor(rng() * CORE_COLORS.length),
+      // Spiral tightness — how fast bands repeat
+      bandWidth: 3.5 + rng() * 3, // blocks per color band
+      // Spiral rotation speed
+      spiralTwist: 0.8 + rng() * 1.5,
+      // Influence radius (normalized)
+      influence: 0.4 + rng() * 0.4,
     });
   }
 
+  // Pre-compute a wobble field for organic imperfection
+  const wobbleScale = 8 + rng() * 6;
+  const wobbleGrid = [];
+  const wCols = Math.ceil(cols / wobbleScale) + 2;
+  const wRows = Math.ceil(rows / wobbleScale) + 2;
+  for (let r = 0; r < wRows; r++) {
+    wobbleGrid[r] = [];
+    for (let c = 0; c < wCols; c++) {
+      wobbleGrid[r][c] = (rng() - 0.5) * 2; // -1 to 1
+    }
+  }
+
+  // Assign each block a color
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
-      // Apply swirl distortion
-      let dx = col;
-      let dy = row;
-      for (const swirl of swirls) {
-        const sdx = col - swirl.x;
-        const sdy = row - swirl.y;
-        const dist = Math.sqrt(sdx * sdx + sdy * sdy);
-        if (dist < swirl.radius) {
-          const angle = (swirl.strength * (swirl.radius - dist)) / swirl.radius;
-          const cos = Math.cos(angle);
-          const sin = Math.sin(angle);
-          dx += (sdx * cos - sdy * sin - sdx) * 0.3;
-          dy += (sdx * sin + sdy * cos - sdy) * 0.3;
+      // Normalized position
+      const nx = col / cols;
+      const ny = row / rows;
+
+      // Get wobble for this position (smooth interpolation)
+      const wobble = sampleWobble(wobbleGrid, col, row, wobbleScale);
+
+      // Find which center has the most influence on this block
+      let bestColor = null;
+      let bestWeight = -1;
+
+      for (const center of centers) {
+        const dx = nx - center.x;
+        const dy = ny - center.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        // Weight falls off with distance from center
+        const normDist = dist / center.influence;
+        if (normDist > 1.5) continue; // Too far from this center
+
+        const weight = 1 / (1 + normDist * normDist);
+
+        if (weight > bestWeight) {
+          bestWeight = weight;
+
+          // Angle from center (for spiral)
+          const angle = Math.atan2(dy, dx);
+
+          // Spiral: distance + angle creates the spiral arm pattern
+          // The key to tie-dye is that color = f(distance + angle*twist)
+          const spiralDist =
+            dist * cols +
+            (angle / (2 * Math.PI)) * center.spiralTwist * center.bandWidth;
+
+          // Add wobble for organic imperfection
+          const wobbledDist = spiralDist + wobble * 1.2;
+
+          // Map distance to color band
+          const bandIndex = Math.floor(wobbledDist / center.bandWidth);
+          const colorIdx =
+            (((bandIndex + center.colorOffset) % CORE_COLORS.length) +
+              CORE_COLORS.length) %
+            CORE_COLORS.length;
+
+          bestColor = CORE_COLORS[colorIdx];
         }
       }
 
-      // Get noise value and map to color
-      const noise = fractalNoise(grids, Math.abs(dx), Math.abs(dy), scales);
-      const colorIndex =
-        Math.floor(noise * CORE_COLORS.length) % CORE_COLORS.length;
-      const color = CORE_COLORS[Math.abs(colorIndex)];
+      // Fallback for blocks too far from any center
+      if (!bestColor) {
+        // Use a gentle gradient based on position
+        const fallbackIdx = Math.floor(
+          ((nx + ny) * 0.5 * CORE_COLORS.length + wobble * 0.5) %
+            CORE_COLORS.length,
+        );
+        bestColor =
+          CORE_COLORS[(fallbackIdx + CORE_COLORS.length) % CORE_COLORS.length];
+      }
 
-      // Add slight variation for organic feel
-      const variation = (rng() - 0.5) * 30;
-      const r = Math.max(0, Math.min(255, color.rgb[0] + variation));
-      const g = Math.max(0, Math.min(255, color.rgb[1] + variation));
-      const b = Math.max(0, Math.min(255, color.rgb[2] + variation));
+      // Slight per-block brightness variation for texture (subtle)
+      const brightness = 0.9 + rng() * 0.2;
+      const r = Math.max(
+        0,
+        Math.min(255, Math.round(bestColor.rgb[0] * brightness)),
+      );
+      const g = Math.max(
+        0,
+        Math.min(255, Math.round(bestColor.rgb[1] * brightness)),
+      );
+      const b = Math.max(
+        0,
+        Math.min(255, Math.round(bestColor.rgb[2] * brightness)),
+      );
 
-      ctx.fillStyle = `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
+      ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
       ctx.fillRect(col * pixelSize, row * pixelSize, pixelSize, pixelSize);
     }
   }
 }
 
 /**
- * Custom Rainbow Mode: each pixel maps 1:1 to a song of that color.
- * Number of colored pixels equals number of songs in each playlist.
+ * Sample the wobble field with bilinear interpolation for smooth distortion.
+ */
+function sampleWobble(grid, col, row, scale) {
+  const fx = col / scale;
+  const fy = row / scale;
+  const ix = Math.floor(fx);
+  const iy = Math.floor(fy);
+  const dx = fx - ix;
+  const dy = fy - iy;
+
+  const r0 = grid[iy] || grid[0];
+  const r1 = grid[iy + 1] || grid[0];
+
+  const v00 = r0[ix] || 0;
+  const v10 = r0[ix + 1] || 0;
+  const v01 = r1[ix] || 0;
+  const v11 = r1[ix + 1] || 0;
+
+  const top = v00 + dx * (v10 - v00);
+  const bottom = v01 + dx * (v11 - v01);
+  return top + dy * (bottom - top);
+}
+
+/**
+ * Custom Rainbow Mode: each color block maps 1:1 to a song.
+ * Arranged in a spiral pattern from center outward for visual cohesion,
+ * with colors grouped in rainbow-order arcs.
  */
 function generateRainbowMode(ctx, cols, rows, pixelSize, playlists, seed) {
   const rng = createRNG(seed);
-  const totalPixels = cols * rows;
+  const totalBlocks = cols * rows;
 
-  // Build a flat array of color assignments based on song counts
+  // Build color assignments based on song counts
   const colorAssignments = [];
   for (const colorDef of CORE_COLORS) {
     const songs = playlists[colorDef.name] || [];
@@ -196,37 +226,71 @@ function generateRainbowMode(ctx, cols, rows, pixelSize, playlists, seed) {
     }
   }
 
-  // If we have fewer songs than pixels, fill remainder with dark background
-  while (colorAssignments.length < totalPixels) {
+  // Fill remainder with dark background
+  while (colorAssignments.length < totalBlocks) {
     colorAssignments.push(null);
   }
 
-  // Shuffle for visual distribution (Fisher-Yates)
-  for (let i = colorAssignments.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [colorAssignments[i], colorAssignments[j]] = [
-      colorAssignments[j],
-      colorAssignments[i],
-    ];
+  // Create a spiral traversal order from center outward
+  const centerCol = Math.floor(cols / 2);
+  const centerRow = Math.floor(rows / 2);
+  const positions = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const dx = c - centerCol;
+      const dy = r - centerRow;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const angle = Math.atan2(dy, dx);
+      positions.push({ col: c, row: r, dist, angle });
+    }
+  }
+  // Sort by distance then angle for spiral effect
+  positions.sort((a, b) => a.dist - b.dist || a.angle - b.angle);
+
+  // Assign colors to spiral positions (keeps same-color blocks clustered)
+  // Add a small shuffle within each color group for texture
+  let assignIdx = 0;
+  for (const colorDef of CORE_COLORS) {
+    const count = (playlists[colorDef.name] || []).length;
+    const group = colorAssignments.slice(assignIdx, assignIdx + count);
+    // Light shuffle within group (swap ~20% of positions)
+    for (let i = group.length - 1; i > 0; i--) {
+      if (rng() < 0.2) {
+        const j = Math.floor(rng() * (i + 1));
+        [group[i], group[j]] = [group[j], group[i]];
+      }
+    }
+    assignIdx += count;
   }
 
-  // Draw pixels
-  let idx = 0;
-  for (let row = 0; row < rows; row++) {
-    for (let col = 0; col < cols; col++) {
-      const colorDef =
-        idx < colorAssignments.length ? colorAssignments[idx] : null;
-      if (colorDef) {
-        const variation = (rng() - 0.5) * 20;
-        const r = Math.max(0, Math.min(255, colorDef.rgb[0] + variation));
-        const g = Math.max(0, Math.min(255, colorDef.rgb[1] + variation));
-        const b = Math.max(0, Math.min(255, colorDef.rgb[2] + variation));
-        ctx.fillStyle = `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
-      } else {
-        ctx.fillStyle = "#1a1a2e";
-      }
-      ctx.fillRect(col * pixelSize, row * pixelSize, pixelSize, pixelSize);
-      idx++;
+  // Draw blocks in spiral order
+  for (let i = 0; i < positions.length; i++) {
+    const pos = positions[i];
+    const colorDef = i < colorAssignments.length ? colorAssignments[i] : null;
+
+    if (colorDef) {
+      const brightness = 0.85 + rng() * 0.3;
+      const r = Math.max(
+        0,
+        Math.min(255, Math.round(colorDef.rgb[0] * brightness)),
+      );
+      const g = Math.max(
+        0,
+        Math.min(255, Math.round(colorDef.rgb[1] * brightness)),
+      );
+      const b = Math.max(
+        0,
+        Math.min(255, Math.round(colorDef.rgb[2] * brightness)),
+      );
+      ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+    } else {
+      ctx.fillStyle = "#1a1a2e";
     }
+    ctx.fillRect(
+      pos.col * pixelSize,
+      pos.row * pixelSize,
+      pixelSize,
+      pixelSize,
+    );
   }
 }
