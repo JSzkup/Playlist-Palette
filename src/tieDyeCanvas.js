@@ -126,18 +126,21 @@ function generateCrackedSpiral(ctx, cols, rows, pixelSize, seed) {
         CORE_COLORS.length;
       const color = CORE_COLORS[colorIdx];
 
-      // Crack detection: cracks appear at band edges (where bandFraction is near 0 or 1)
+      // Crack detection: cracks are RADIAL — running outward from center,
+      // cutting across the color bands (like fold lines in real tie-dye).
       const crackNoise = sampleNoise(crackGrid, col, row, 3);
-      const edgeProximity = Math.min(bandFraction, 1 - bandFraction); // 0 at edges, 0.5 at center
+      const isRadialCrack = isOnRadialCrack(
+        col,
+        row,
+        cx,
+        cy,
+        dist,
+        angle,
+        crackNoise,
+        seed,
+      );
 
-      // Crack threshold — varies spatially so cracks aren't uniform
-      const crackThreshold = 0.04 + crackNoise * 0.08;
-      const isCrack = edgeProximity < crackThreshold;
-
-      // Additional random "fold cracks" that cut through bands
-      const foldCrack = isFoldCrack(col, row, cx, cy, rng, seed);
-
-      if (isCrack || foldCrack) {
+      if (isRadialCrack) {
         // White/cream crack
         const crackBrightness = 0.92 + rng() * 0.08;
         const r = Math.round(CRACK_COLOR[0] * crackBrightness);
@@ -148,6 +151,7 @@ function generateCrackedSpiral(ctx, cols, rows, pixelSize, seed) {
         // Dyed color with slight saturation variation
         const satVar = 0.82 + rng() * 0.25;
         // Slightly desaturate toward band edges for bleed effect
+        const edgeProximity = Math.min(bandFraction, 1 - bandFraction);
         const edgeFade = 0.85 + edgeProximity * 0.3;
         const intensity = satVar * edgeFade;
 
@@ -172,39 +176,45 @@ function generateCrackedSpiral(ctx, cols, rows, pixelSize, seed) {
 }
 
 /**
- * Determines if a block is part of a "fold crack" — radial lines
- * emanating from the spiral center where the fabric was folded.
- * These appear as thin white lines radiating outward.
+ * Determines if a block falls on a radial crack — a line running outward
+ * from the spiral center. These represent fold creases in the fabric
+ * where dye couldn't reach. They cut ACROSS the color bands.
+ *
+ * Creates 6-10 radial crack lines at fixed angles with varying width,
+ * intermittent gaps, and slight curvature.
  */
-function isFoldCrack(col, row, cx, cy, rng, seed) {
-  const dx = col - cx;
-  const dy = row - cy;
-  const dist = Math.sqrt(dx * dx + dy * dy);
+function isOnRadialCrack(col, row, cx, cy, dist, angle, noiseVal, seed) {
+  if (dist < 3) return false; // No cracks right at center
 
-  if (dist < 2) return false; // Skip center
+  const crackRng = createRNG(seed + 555);
+  const numCracks = 6 + Math.floor(crackRng() * 5); // 6-10 radial cracks
 
-  const angle = Math.atan2(dy, dx);
+  for (let i = 0; i < numCracks; i++) {
+    // Fixed angle for this crack line
+    const crackAngle = -Math.PI + crackRng() * 2 * Math.PI;
 
-  // Create 5-8 fold lines at fixed angles (seeded)
-  const foldRng = createRNG(seed + 777);
-  const numFolds = 5 + Math.floor(foldRng() * 4);
-  const foldAngles = [];
-  for (let i = 0; i < numFolds; i++) {
-    foldAngles.push(-Math.PI + foldRng() * 2 * Math.PI);
-  }
+    // Slight curve to the crack (not perfectly straight)
+    const curvature = (crackRng() - 0.5) * 0.015;
+    const curvedAngle = crackAngle + curvature * dist;
 
-  // Check if this block is near any fold line
-  for (const foldAngle of foldAngles) {
-    let angleDiff = Math.abs(angle - foldAngle);
+    // Angular distance from this block to the crack line
+    let angleDiff = Math.abs(angle - curvedAngle);
     if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
 
-    // Fold line width varies with distance (thinner far out)
-    const lineWidth = 0.025 / (1 + dist * 0.02);
+    // Crack width — varies along its length and gets slightly wider farther out
+    const baseWidth = 0.02 + crackRng() * 0.02;
+    const widthAtDist = baseWidth * (1 + dist * 0.005);
 
-    if (angleDiff < lineWidth) {
-      // Not every point on the fold line shows a crack — intermittent
-      const crackChance = 0.3 + 0.2 * Math.sin(dist * 0.5 + foldAngle * 3);
-      if (foldRng() < crackChance) {
+    // Noise-based modulation to make crack width uneven
+    const widthMod = widthAtDist * (0.6 + (noiseVal + 1) * 0.4);
+
+    if (angleDiff < widthMod) {
+      // Intermittent gaps — crack doesn't run continuously
+      // Use a hash of distance to create on/off segments
+      const segmentPhase = Math.sin(dist * 0.8 + i * 17.3) * 0.5 + 0.5;
+      const gapThreshold = 0.25 + crackRng() * 0.2; // 25-45% of length is gap
+
+      if (segmentPhase > gapThreshold) {
         return true;
       }
     }

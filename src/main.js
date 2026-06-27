@@ -112,6 +112,7 @@ function initVisualizer() {
 
   // Selection manager
   initSelectionManager(selectionChips, (colors) => {
+    console.log("[Selection] Colors changed:", colors);
     generateBlendBtn.disabled = colors.length < 2;
   });
 
@@ -234,15 +235,18 @@ function initVisualizer() {
 
     const { r, g, b } = getBlockColor(block.blockCol, block.blockRow);
     const colorName = findClosestColor(r, g, b);
+    if (!colorName) return; // Dead space (white cracks) — no interaction
     toggleColor(colorName);
   });
 
   // Generate blend button
   generateBlendBtn.addEventListener("click", () => {
     const selected = getSelectedColors();
+    console.log("[Blend] Button clicked, selected:", selected);
     if (selected.length < 2) return;
 
     const blended = generateBlendedPlaylist(appState.playlists, selected);
+    console.log("[Blend] Generated playlist:", blended.length, "tracks");
     renderBlendedPlaylist(sidebar, blended, selected);
     sidebar.classList.add("open");
   });
