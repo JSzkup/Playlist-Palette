@@ -1,26 +1,32 @@
 /**
  * Tie-Dye Canvas Generator
  *
- * Generates a procedural pixelated tie-dye pattern that mimics real tie-dye:
- * bold concentric spiral color bands radiating from fold points.
- * Each "pixel" is a color block (e.g., 8×8 actual pixels).
+ * Generates a procedural pixelated tie-dye pattern that mimics a real
+ * hand-twisted single-spiral tie-dye shirt. Features:
+ * - One off-center spiral origin
+ * - Rainbow color bands radiating outward with spiral twist
+ * - White/cream "cracks" along band edges (where dye didn't reach the folds)
+ * - Imperfect, wobbly band edges with organic bleeding
  *
- * Supports "Custom Rainbow Mode" where block counts match song counts per color.
+ * Each "pixel" is a color block (default 8×8 actual pixels).
  */
 
-// Core playlist colors with RGB values
+// Core playlist colors — saturated dye-like tones
 const CORE_COLORS = [
-  { name: "Red", rgb: [255, 30, 30] },
-  { name: "Orange", rgb: [255, 140, 20] },
-  { name: "Yellow", rgb: [255, 230, 30] },
-  { name: "Green", rgb: [20, 160, 50] },
-  { name: "Blue", rgb: [30, 60, 255] },
-  { name: "Purple", rgb: [140, 30, 180] },
-  { name: "Pink", rgb: [255, 100, 160] },
+  { name: "Red", rgb: [220, 25, 25] },
+  { name: "Orange", rgb: [240, 130, 10] },
+  { name: "Yellow", rgb: [245, 220, 20] },
+  { name: "Green", rgb: [15, 150, 50] },
+  { name: "Blue", rgb: [25, 50, 230] },
+  { name: "Purple", rgb: [130, 20, 170] },
+  { name: "Pink", rgb: [240, 80, 140] },
 ];
 
+// The undyed fabric color (white/cream that shows in cracks)
+const CRACK_COLOR = [250, 245, 235];
+
 /**
- * Simple seeded pseudo-random number generator (mulberry32).
+ * Seeded PRNG (mulberry32).
  */
 function createRNG(seed) {
   let s = seed | 0;
@@ -33,14 +39,7 @@ function createRNG(seed) {
 }
 
 /**
- * Generates the tie-dye pattern on the canvas.
- *
- * @param {HTMLCanvasElement} canvas
- * @param {Object} options
- * @param {number} [options.pixelSize=8] - Size of each color block in actual pixels
- * @param {number} [options.seed] - Random seed
- * @param {boolean} [options.rainbowMode=false] - Custom rainbow mode
- * @param {Record<string, object[]>} [options.playlists] - Playlist data (for rainbow mode)
+ * Main export — generates the tie-dye pattern on the canvas.
  */
 export function generateTieDye(canvas, options = {}) {
   const {
@@ -59,135 +58,183 @@ export function generateTieDye(canvas, options = {}) {
   if (rainbowMode && playlists) {
     generateRainbowMode(ctx, cols, rows, pixelSize, playlists, seed);
   } else {
-    generateSpiralTieDye(ctx, cols, rows, pixelSize, seed);
+    generateCrackedSpiral(ctx, cols, rows, pixelSize, seed);
   }
 }
 
 /**
- * Spiral tie-dye: creates 2-4 fold centers, each radiating concentric
- * color bands that spiral outward. Colors transition in rainbow order
- * as you move away from the center, with slight wobble for organic feel.
+ * Cracked spiral tie-dye — single spiral center with imperfect bands
+ * and white cracks along fold lines.
  */
-function generateSpiralTieDye(ctx, cols, rows, pixelSize, seed) {
+function generateCrackedSpiral(ctx, cols, rows, pixelSize, seed) {
   const rng = createRNG(seed);
 
-  // Create fold/spiral centers (like where you'd pinch the fabric)
-  const numCenters = 2 + Math.floor(rng() * 3); // 2-4 centers
-  const centers = [];
-  for (let i = 0; i < numCenters; i++) {
-    centers.push({
-      x: 0.15 + rng() * 0.7, // normalized 0-1, keep away from edges
-      y: 0.15 + rng() * 0.7,
-      // Each center starts at a different color offset for variety
-      colorOffset: Math.floor(rng() * CORE_COLORS.length),
-      // Spiral tightness — how fast bands repeat
-      bandWidth: 3.5 + rng() * 3, // blocks per color band
-      // Spiral rotation speed
-      spiralTwist: 0.8 + rng() * 1.5,
-      // Influence radius (normalized)
-      influence: 0.4 + rng() * 0.4,
-    });
-  }
+  // Spiral center — slightly off-center for organic feel
+  const cx = (0.35 + rng() * 0.3) * cols;
+  const cy = (0.35 + rng() * 0.3) * rows;
 
-  // Pre-compute a wobble field for organic imperfection
-  const wobbleScale = 8 + rng() * 6;
-  const wobbleGrid = [];
-  const wCols = Math.ceil(cols / wobbleScale) + 2;
-  const wRows = Math.ceil(rows / wobbleScale) + 2;
-  for (let r = 0; r < wRows; r++) {
-    wobbleGrid[r] = [];
-    for (let c = 0; c < wCols; c++) {
-      wobbleGrid[r][c] = (rng() - 0.5) * 2; // -1 to 1
-    }
-  }
+  // How many color-widths fit in one full revolution
+  const spiralTightness = 1.8 + rng() * 1.2; // controls band width
+  const bandWidth = cols / (CORE_COLORS.length * spiralTightness);
 
-  // Assign each block a color
+  // Direction of spiral (clockwise or counter-clockwise)
+  const spiralDir = rng() > 0.5 ? 1 : -1;
+
+  // Generate a wobble noise field for imperfect band edges
+  const wobbleGrid = makeNoiseGrid(cols, rows, 5 + Math.floor(rng() * 4), rng);
+
+  // A second noise field for crack placement
+  const crackGrid = makeNoiseGrid(cols, rows, 3 + Math.floor(rng() * 3), rng);
+
+  // A third noise for radial distortion (makes bands uneven widths)
+  const radialGrid = makeNoiseGrid(cols, rows, 7 + Math.floor(rng() * 5), rng);
+
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
-      // Normalized position
-      const nx = col / cols;
-      const ny = row / rows;
+      const dx = col - cx;
+      const dy = row - cy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const angle = Math.atan2(dy, dx); // -PI to PI
 
-      // Get wobble for this position (smooth interpolation)
-      const wobble = sampleWobble(wobbleGrid, col, row, wobbleScale);
+      // Radial distortion — makes bands wobbly/uneven
+      const radialWobble =
+        sampleNoise(radialGrid, col, row, 7) * bandWidth * 0.6;
 
-      // Find which center has the most influence on this block
-      let bestColor = null;
-      let bestWeight = -1;
+      // Spiral formula: combine distance and angle
+      // Normalize angle to 0-1 range
+      const normAngle = (angle + Math.PI) / (2 * Math.PI);
 
-      for (const center of centers) {
-        const dx = nx - center.x;
-        const dy = ny - center.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
+      // The spiral value determines which color band we're in
+      const spiralVal =
+        dist +
+        radialWobble +
+        normAngle * spiralDir * bandWidth * CORE_COLORS.length;
 
-        // Weight falls off with distance from center
-        const normDist = dist / center.influence;
-        if (normDist > 1.5) continue; // Too far from this center
+      // Edge wobble — distorts band boundaries
+      const edgeWobble =
+        sampleNoise(wobbleGrid, col, row, 5) * bandWidth * 0.35;
+      const finalVal = spiralVal + edgeWobble;
 
-        const weight = 1 / (1 + normDist * normDist);
+      // Map to color band
+      const bandFloat = finalVal / bandWidth;
+      const bandIndex = Math.floor(bandFloat);
+      const bandFraction = bandFloat - bandIndex; // 0-1 position within band
 
-        if (weight > bestWeight) {
-          bestWeight = weight;
+      // Color for this band
+      const colorIdx =
+        ((bandIndex % CORE_COLORS.length) + CORE_COLORS.length) %
+        CORE_COLORS.length;
+      const color = CORE_COLORS[colorIdx];
 
-          // Angle from center (for spiral)
-          const angle = Math.atan2(dy, dx);
+      // Crack detection: cracks appear at band edges (where bandFraction is near 0 or 1)
+      const crackNoise = sampleNoise(crackGrid, col, row, 3);
+      const edgeProximity = Math.min(bandFraction, 1 - bandFraction); // 0 at edges, 0.5 at center
 
-          // Spiral: distance + angle creates the spiral arm pattern
-          // The key to tie-dye is that color = f(distance + angle*twist)
-          const spiralDist =
-            dist * cols +
-            (angle / (2 * Math.PI)) * center.spiralTwist * center.bandWidth;
+      // Crack threshold — varies spatially so cracks aren't uniform
+      const crackThreshold = 0.04 + crackNoise * 0.08;
+      const isCrack = edgeProximity < crackThreshold;
 
-          // Add wobble for organic imperfection
-          const wobbledDist = spiralDist + wobble * 1.2;
+      // Additional random "fold cracks" that cut through bands
+      const foldCrack = isFoldCrack(col, row, cx, cy, rng, seed);
 
-          // Map distance to color band
-          const bandIndex = Math.floor(wobbledDist / center.bandWidth);
-          const colorIdx =
-            (((bandIndex + center.colorOffset) % CORE_COLORS.length) +
-              CORE_COLORS.length) %
-            CORE_COLORS.length;
+      if (isCrack || foldCrack) {
+        // White/cream crack
+        const crackBrightness = 0.92 + rng() * 0.08;
+        const r = Math.round(CRACK_COLOR[0] * crackBrightness);
+        const g = Math.round(CRACK_COLOR[1] * crackBrightness);
+        const b = Math.round(CRACK_COLOR[2] * crackBrightness);
+        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+      } else {
+        // Dyed color with slight saturation variation
+        const satVar = 0.82 + rng() * 0.25;
+        // Slightly desaturate toward band edges for bleed effect
+        const edgeFade = 0.85 + edgeProximity * 0.3;
+        const intensity = satVar * edgeFade;
 
-          bestColor = CORE_COLORS[colorIdx];
-        }
-      }
-
-      // Fallback for blocks too far from any center
-      if (!bestColor) {
-        // Use a gentle gradient based on position
-        const fallbackIdx = Math.floor(
-          ((nx + ny) * 0.5 * CORE_COLORS.length + wobble * 0.5) %
-            CORE_COLORS.length,
+        const r = Math.max(
+          0,
+          Math.min(255, Math.round(color.rgb[0] * intensity)),
         );
-        bestColor =
-          CORE_COLORS[(fallbackIdx + CORE_COLORS.length) % CORE_COLORS.length];
+        const g = Math.max(
+          0,
+          Math.min(255, Math.round(color.rgb[1] * intensity)),
+        );
+        const b = Math.max(
+          0,
+          Math.min(255, Math.round(color.rgb[2] * intensity)),
+        );
+        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
       }
 
-      // Slight per-block brightness variation for texture (subtle)
-      const brightness = 0.9 + rng() * 0.2;
-      const r = Math.max(
-        0,
-        Math.min(255, Math.round(bestColor.rgb[0] * brightness)),
-      );
-      const g = Math.max(
-        0,
-        Math.min(255, Math.round(bestColor.rgb[1] * brightness)),
-      );
-      const b = Math.max(
-        0,
-        Math.min(255, Math.round(bestColor.rgb[2] * brightness)),
-      );
-
-      ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
       ctx.fillRect(col * pixelSize, row * pixelSize, pixelSize, pixelSize);
     }
   }
 }
 
 /**
- * Sample the wobble field with bilinear interpolation for smooth distortion.
+ * Determines if a block is part of a "fold crack" — radial lines
+ * emanating from the spiral center where the fabric was folded.
+ * These appear as thin white lines radiating outward.
  */
-function sampleWobble(grid, col, row, scale) {
+function isFoldCrack(col, row, cx, cy, rng, seed) {
+  const dx = col - cx;
+  const dy = row - cy;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+
+  if (dist < 2) return false; // Skip center
+
+  const angle = Math.atan2(dy, dx);
+
+  // Create 5-8 fold lines at fixed angles (seeded)
+  const foldRng = createRNG(seed + 777);
+  const numFolds = 5 + Math.floor(foldRng() * 4);
+  const foldAngles = [];
+  for (let i = 0; i < numFolds; i++) {
+    foldAngles.push(-Math.PI + foldRng() * 2 * Math.PI);
+  }
+
+  // Check if this block is near any fold line
+  for (const foldAngle of foldAngles) {
+    let angleDiff = Math.abs(angle - foldAngle);
+    if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
+
+    // Fold line width varies with distance (thinner far out)
+    const lineWidth = 0.025 / (1 + dist * 0.02);
+
+    if (angleDiff < lineWidth) {
+      // Not every point on the fold line shows a crack — intermittent
+      const crackChance = 0.3 + 0.2 * Math.sin(dist * 0.5 + foldAngle * 3);
+      if (foldRng() < crackChance) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Create a low-resolution noise grid for spatial variation.
+ */
+function makeNoiseGrid(cols, rows, scale, rng) {
+  const w = Math.ceil(cols / scale) + 2;
+  const h = Math.ceil(rows / scale) + 2;
+  const grid = [];
+  for (let r = 0; r < h; r++) {
+    grid[r] = [];
+    for (let c = 0; c < w; c++) {
+      grid[r][c] = rng() * 2 - 1; // -1 to 1
+    }
+  }
+  return { data: grid, scale };
+}
+
+/**
+ * Sample noise with bilinear interpolation.
+ */
+function sampleNoise(noiseObj, col, row, _unused) {
+  const scale = noiseObj.scale;
+  const grid = noiseObj.data;
   const fx = col / scale;
   const fy = row / scale;
   const ix = Math.floor(fx);
@@ -195,23 +242,26 @@ function sampleWobble(grid, col, row, scale) {
   const dx = fx - ix;
   const dy = fy - iy;
 
+  // Smoothstep interpolation
+  const sx = dx * dx * (3 - 2 * dx);
+  const sy = dy * dy * (3 - 2 * dy);
+
   const r0 = grid[iy] || grid[0];
   const r1 = grid[iy + 1] || grid[0];
 
-  const v00 = r0[ix] || 0;
-  const v10 = r0[ix + 1] || 0;
-  const v01 = r1[ix] || 0;
-  const v11 = r1[ix + 1] || 0;
+  const v00 = r0[ix] !== undefined ? r0[ix] : 0;
+  const v10 = r0[ix + 1] !== undefined ? r0[ix + 1] : 0;
+  const v01 = r1[ix] !== undefined ? r1[ix] : 0;
+  const v11 = r1[ix + 1] !== undefined ? r1[ix + 1] : 0;
 
-  const top = v00 + dx * (v10 - v00);
-  const bottom = v01 + dx * (v11 - v01);
-  return top + dy * (bottom - top);
+  const top = v00 + sx * (v10 - v00);
+  const bottom = v01 + sx * (v11 - v01);
+  return top + sy * (bottom - top);
 }
 
 /**
- * Custom Rainbow Mode: each color block maps 1:1 to a song.
- * Arranged in a spiral pattern from center outward for visual cohesion,
- * with colors grouped in rainbow-order arcs.
+ * Custom Rainbow Mode: blocks distributed in spiral order from center,
+ * with song count per color determining how many blocks of that color exist.
  */
 function generateRainbowMode(ctx, cols, rows, pixelSize, playlists, seed) {
   const rng = createRNG(seed);
@@ -226,12 +276,12 @@ function generateRainbowMode(ctx, cols, rows, pixelSize, playlists, seed) {
     }
   }
 
-  // Fill remainder with dark background
+  // Fill remainder with crack/background
   while (colorAssignments.length < totalBlocks) {
     colorAssignments.push(null);
   }
 
-  // Create a spiral traversal order from center outward
+  // Spiral order from center
   const centerCol = Math.floor(cols / 2);
   const centerRow = Math.floor(rows / 2);
   const positions = [];
@@ -244,32 +294,15 @@ function generateRainbowMode(ctx, cols, rows, pixelSize, playlists, seed) {
       positions.push({ col: c, row: r, dist, angle });
     }
   }
-  // Sort by distance then angle for spiral effect
   positions.sort((a, b) => a.dist - b.dist || a.angle - b.angle);
 
-  // Assign colors to spiral positions (keeps same-color blocks clustered)
-  // Add a small shuffle within each color group for texture
-  let assignIdx = 0;
-  for (const colorDef of CORE_COLORS) {
-    const count = (playlists[colorDef.name] || []).length;
-    const group = colorAssignments.slice(assignIdx, assignIdx + count);
-    // Light shuffle within group (swap ~20% of positions)
-    for (let i = group.length - 1; i > 0; i--) {
-      if (rng() < 0.2) {
-        const j = Math.floor(rng() * (i + 1));
-        [group[i], group[j]] = [group[j], group[i]];
-      }
-    }
-    assignIdx += count;
-  }
-
-  // Draw blocks in spiral order
+  // Draw
   for (let i = 0; i < positions.length; i++) {
     const pos = positions[i];
     const colorDef = i < colorAssignments.length ? colorAssignments[i] : null;
 
     if (colorDef) {
-      const brightness = 0.85 + rng() * 0.3;
+      const brightness = 0.82 + rng() * 0.25;
       const r = Math.max(
         0,
         Math.min(255, Math.round(colorDef.rgb[0] * brightness)),
@@ -284,7 +317,7 @@ function generateRainbowMode(ctx, cols, rows, pixelSize, playlists, seed) {
       );
       ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
     } else {
-      ctx.fillStyle = "#1a1a2e";
+      ctx.fillStyle = `rgb(${CRACK_COLOR[0]}, ${CRACK_COLOR[1]}, ${CRACK_COLOR[2]})`;
     }
     ctx.fillRect(
       pos.col * pixelSize,
