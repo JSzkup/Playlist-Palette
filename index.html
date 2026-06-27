@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Color Playlists Visualizer</title>
+    <link rel="stylesheet" href="src/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="upload-view" class="upload-view">
+        <h1>Color Playlists</h1>
+        <p class="subtitle">Drop your playlist CSVs to get started</p>
+
+        <div id="drop-zone" class="drop-zone">
+          <div class="drop-zone-content">
+            <svg
+              class="drop-icon"
+              xmlns="http://www.w3.org/2000/svg"
+              width="48"
+              height="48"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            <p class="drop-text">
+              Drag &amp; drop <code>.csv</code> files here
+            </p>
+            <p class="drop-hint">or</p>
+            <label class="file-input-label">
+              Browse Files
+              <input type="file" id="file-input" multiple accept=".csv" />
+            </label>
+          </div>
+        </div>
+
+        <div id="file-status" class="file-status" aria-live="polite"></div>
+      </div>
+
+      <div id="visualizer-view" class="visualizer-view hidden">
+        <div class="visualizer-layout">
+          <div class="visualizer-main">
+            <div class="visualizer-controls">
+              <button
+                id="regenerate-btn"
+                class="viz-btn"
+                aria-label="Regenerate pattern"
+              >
+                Refresh
+              </button>
+              <label class="rainbow-toggle">
+                <input type="checkbox" id="rainbow-mode-toggle" />
+                <span>Custom Rainbow Mode</span>
+              </label>
+            </div>
+
+            <div class="canvas-wrapper">
+              <canvas id="tie-dye-canvas" width="600" height="600"></canvas>
+            </div>
+
+            <div
+              id="selection-chips"
+              class="selection-chips"
+              aria-label="Selected colors"
+            ></div>
+
+            <div class="blend-controls">
+              <button
+                id="generate-blend-btn"
+                class="viz-btn blend-btn"
+                disabled
+              >
+                Generate Blend
+              </button>
+              <button id="clear-selection-btn" class="viz-btn clear-btn">
+                Clear
+              </button>
+            </div>
+          </div>
+
+          <aside
+            id="blend-sidebar"
+            class="blend-sidebar"
+            aria-label="Blended playlist"
+          >
+            <div class="blend-sidebar-header">
+              <h2 class="blend-header-text">Blended Playlist</h2>
+              <button
+                id="close-sidebar-btn"
+                class="viz-btn close-btn"
+                aria-label="Close sidebar"
+              >
+                &times;
+              </button>
+            </div>
+            <ul class="blend-list"></ul>
+          </aside>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="src/main.js"></script>
+  </body>
+</html>
